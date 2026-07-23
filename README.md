@@ -97,7 +97,7 @@ customer's wallet is already open.
 
 **SQL** — build one clean user-level (and session-level, where needed)
 analytical table joining `users`, `experiment_assignments`,
-`checkout_sessions`, and `orders`; derive tenure/frequency segment, per-user
+`checkout_sessions`, and `orders`; derive frequency segment, per-user
 and per-session metrics, and the abandonment flag. Query logic is intentionally
 not specified here — that design and implementation is the author's own work.
 

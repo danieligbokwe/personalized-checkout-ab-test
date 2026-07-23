@@ -187,14 +187,15 @@ def generate_orders(sessions_df, assignments_df, seed):
         # mixture model: most orders are modest, a small fraction are large "big basket" orders,
         # so the overall range realistically spans single digits up to a few thousand dollars.
         mu, sigma = 3.2, 0.6
-        big_basket_p = 0.03       # ~3% of orders are large baskets
+        big_basket_p = 0.025      # baseline big-basket rate
         big_basket_mult_low, big_basket_mult_high = 8, 35
 
         unit_lambda = 2.3
 
         if is_in_window and variant == "treatment":
-            mu += 0.09           # AOV lift for treatment, baked in
-            unit_lambda += 0.35  # UPT lift for treatment, baked in
+            mu += 0.05
+            unit_lambda += 0.15
+            big_basket_p = 0.037
 
         amount = float(rng.lognormal(mean=mu, sigma=sigma))
         is_big_basket = rng.random() < big_basket_p

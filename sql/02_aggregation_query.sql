@@ -81,22 +81,44 @@ INNER JOIN segmented_users su
 INNER JOIN experiment_sessions es
     ON u.user_id = es.user_id
 INNER JOIN user_orders uo
-    ON u.user_id = uo.user_id;
+    ON u.user_id = uo.user_id
 
 -- Create order-level table for metrics like AOV (Average Order Value) and UPT (Units Per Transaction)
 -- Kept separate from the user-level table above: AOV/UPT are transaction-level metrics,
 -- and averaging per-user averages would distort them if users place different numbers
 -- of orders -- every order needs to count once, equally, not be pre-averaged per user.
+WITH segmented_users AS (
+    SELECT
+        u.user_id,
+        -- count(o.order_id), not count(*) -- LEFT JOIN produces one NULL order row per
+        -- unmatched session; count(*) would count those rows and misclassify browsers
+        -- with zero purchases as "frequent"
+        CASE WHEN count(o.order_id) >= 3 THEN 'frequent' ELSE 'occasional' END AS segment
+    FROM users u
+    INNER JOIN experiment_assignments a
+             ON u.user_id = a.user_id
+    INNER JOIN checkout_sessions s
+             ON u.user_id = s.user_id
+    -- LEFT JOIN (not INNER) so users with zero prior orders are kept and correctly
+    -- counted as 0, rather than dropped from the result entirely
+    LEFT JOIN orders o
+             ON s.session_id = o.session_id AND
+                o.order_date >= a.first_assigned_ts::date - INTERVAL '90 days' AND
+                o.order_date < a.first_assigned_ts
+    GROUP BY u.user_id
+)
 SELECT
-    a.variant,
     o.order_id,
     o.order_amount,
-    o.unit_count
+    o.unit_count,
+    a.variant,
+    s.user_id,
+    su.segment
 FROM orders o
 INNER JOIN checkout_sessions s
     ON o.session_id = s.session_id
-INNER JOIN users u
-    ON s.user_id = u.user_id
 INNER JOIN experiment_assignments a
     ON s.user_id = a.user_id
+INNER JOIN segmented_users su
+    ON s.user_id = su.user_id
 WHERE o.order_date >= a.first_assigned_ts::date;
