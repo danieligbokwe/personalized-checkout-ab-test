@@ -81,7 +81,7 @@ INNER JOIN segmented_users su
 INNER JOIN experiment_sessions es
     ON u.user_id = es.user_id
 INNER JOIN user_orders uo
-    ON u.user_id = uo.user_id
+    ON u.user_id = uo.user_id;
 
 -- Create order-level table for metrics like AOV (Average Order Value) and UPT (Units Per Transaction)
 -- Kept separate from the user-level table above: AOV/UPT are transaction-level metrics,

@@ -1,4 +1,4 @@
-# One-Click Smart Upsells A/B Test
+# Personalized Checkout A/B Test
 
 ## Business Question
 
@@ -8,15 +8,16 @@ shoppers?
 
 ## Company
 
-Fictional retail app with an active user base of approximately 1M users. Users shop and check out through the app.
+Fictional retail app with an active user base of approximately 200,000
+users.
 
 ## The Feature
 
 **One-Click Smart Upsells at Checkout** — a "Last-Minute Additions" carousel
 displayed after the user clicks checkout but before final payment
-confirmation, featuring personalized, low-friction add-ons under $15. Modeled
-on the grocery store checkout aisle: capturing impulse buys when the
-customer's wallet is already open.
+confirmation, featuring personalized, low-friction add-ons under $15. The
+carousel surfaces multiple personalized suggestions per checkout,
+occasionally leading to substantially larger add-on baskets.
 
 ## Experiment Design
 
