@@ -8,7 +8,7 @@ shoppers?
 
 ## Company
 
-Fictional retail app with an active user base of approximately 1 users. Users shop and check out through the app.
+Fictional retail app with an active user base of approximately 1M users. Users shop and check out through the app.
 
 ## The Feature
 
