@@ -1,181 +1,181 @@
 # Personalized Checkout A/B Test
 
-## Business Question
+End-to-end A/B test analysis of a personalized "Last-Minute Additions" checkout carousel
+for a retail app (~200K active users). It covers experiment design, a PostgreSQL
+aggregation pipeline, statistical inference in Python, and a business recommendation.
 
-Does a personalized "Last-Minute Additions" checkout carousel increase spend per order
-without raising cart abandonment and does the effect differ between frequent and occasional
-shoppers?
+**SQL (PostgreSQL)** · **Python (pandas, SciPy, statsmodels)** · **Experiment design** · **Tableau**
 
-## Company
+> **Business question:** Does a personalized checkout carousel increase spend per order
+> without raising cart abandonment, and does the effect differ between frequent and
+> occasional shoppers?
 
-Fictional retail app with an active user base of approximately 200,000
-users.
+---
 
-## The Feature
+## Results
 
-**One-Click Smart Upsells at Checkout** — a "Last-Minute Additions" carousel
-displayed after the user clicks checkout but before final payment
-confirmation, featuring personalized, low-friction add-ons under $15. The
-carousel surfaces multiple personalized suggestions per checkout,
-occasionally leading to substantially larger add-on baskets.
+![Relative lift vs. control with 95% confidence intervals](assets/lift_summary.png)
+
+| Metric | Control | Treatment | Lift | p-value |
+| --- | --- | --- | --- | --- |
+| Average Order Value (AOV) | $46.41 | $53.56 | **+15.4%** | 0.0005 |
+| Units Per Transaction (UPT) | 3.48 | 4.08 | **+17.1%** | < 0.0001 |
+| Revenue per Revenue-Generating User (RPRU) | $85.63 | $97.72 | **+14.1%** | 0.0023 |
+| Cart abandonment *(guardrail)* | 22.18% | 24.91% | **+12.3% rel.** | < 0.0001 |
+
+**Key findings**
+
+- **The carousel works.** All three spend metrics rose significantly. The sample split
+  passed a Sample Ratio Mismatch check (χ² p = 0.66).
+- **It has a cost.** Cart abandonment rose 2.7 percentage points. That result holds when
+  sessions are grouped by user, to account for repeat sessions from the same person.
+- **The net effect is positive.** Revenue per assigned user, which includes the revenue
+  lost to extra abandoned carts, rose ~12% (p = 0.009). Annualized, that projects to
+  **~$7.3M** in incremental revenue for a full rollout, or **~$3.6M** for frequent
+  shoppers alone.
+- **The segment difference is directional only.** Frequent shoppers showed a larger
+  spend lift and a smaller abandonment increase, but the treatment × segment interaction
+  tests are not significant (AOV p = 0.53, RPRU p = 0.18).
+
+**Recommendation:** Roll out in phases. Start with frequent shoppers, who have the lowest
+baseline abandonment and the strongest directional response. Add an easier skip/dismiss
+option before extending to occasional shoppers, and keep abandonment as a standing
+guardrail.
+
+📄 [**Executive memo (PDF)**](memo/executive_summary.pdf) · 📓 [**Analysis notebook**](notebooks/analysis.ipynb) · 🗄️ [**SQL pipeline**](sql/02_aggregation_query.sql)
+
+---
 
 ## Experiment Design
 
-- **Population:** app users reaching checkout
-- **Control:** goes straight from cart to payment, no carousel
-- **Treatment:** encounters the "Last-Minute Additions" carousel before
-  payment confirmation
-- **Randomization unit:** user, assigned once at their first checkout session
-  during the experiment window, and fixed for all subsequent sessions (not
-  re-randomized per session — this avoids the same user appearing in both
-  groups and keeps observations independent)
+| | |
+| --- | --- |
+| **Population** | App users reaching checkout during a 90-day window (13,059 assigned of 20,000 users) |
+| **Control** | Standard flow: cart → payment |
+| **Treatment** | "Last-Minute Additions" carousel of personalized add-ons under $15, shown before payment |
+| **Randomization unit** | User, assigned once at their first in-window checkout and fixed after that, so no user appears in both arms |
+| **Segment** | *Frequent* = 3+ completed orders in the 90 days **before** assignment; otherwise *occasional* (pre-treatment, fixed threshold) |
 
-### Metrics
+| Type | Metric | Question it answers |
+| --- | --- | --- |
+| Primary | AOV | Did the dollar value per transaction increase? |
+| Primary | RPRU | Did buyers spend more in total? |
+| Secondary | UPT | Did they buy more items, or just pricier ones? |
+| Guardrail | Cart abandonment rate | Did the extra step add friction that drove buyers away? |
 
-| Type      | Metric                                     | What It Proves                                                   |
-| --------- | ------------------------------------------ | ---------------------------------------------------------------- |
-| Primary   | Average Order Value (AOV)                  | Did the total dollar value per transaction increase?             |
-| Primary   | Revenue per Revenue-Generating User (RPRU) | Did the feature get existing buyers to spend more heavily?       |
-| Secondary | Units Per Transaction (UPT)                | Did they buy more items, or just more expensive items?           |
-| Guardrail | Cart Abandonment Rate                      | Did the spend-nudge add too much friction and scare buyers away? |
+## Methodology
 
-- **Segmentation:** frequent vs. occasional shopper, derived from completed
-  order count in the 90 days prior to the user's first assignment (a fixed
-  threshold, not a median split, to keep the segment definition stable across
-  runs of the analysis)
-- **Pre-analysis check:** Sample Ratio Mismatch (chi-square goodness-of-fit)
-  on the control/treatment split before trusting any downstream result.
-- **Business translation:** AOV/RPRU lift, by segment, converted to
-  projected incremental revenue.
+**1. SQL: build analysis-ready tables** ([`sql/`](sql/))
 
-## Data Schema
+Four normalized tables are joined into two outputs:
+- a **user-level** table (segment, sessions, abandonment, total spend)
+- an **order-level** table (AOV and UPT)
 
-![Schema Diagram](assets/schema_diagram.png)
+They're kept separate because averaging per-user averages would over-weight users who
+place few orders. Join and filter decisions (LEFT vs. INNER, `ON` vs. `WHERE`,
+`COUNT(col)` vs. `COUNT(*)`, DATE/TIMESTAMP casting) are documented in
+[`sql_decisions.md`](sql/sql_decisions.md).
 
-**users**
+**2. Python: statistical inference** ([`notebooks/analysis.ipynb`](notebooks/analysis.ipynb))
 
-| Column      | Type         | Notes                                       |
-| ----------- | ------------ | ------------------------------------------- |
-| user_id     | VARCHAR (PK) | prefixed alphanumeric, e.g.`usr_9f2k1a3c` |
-| signup_date | DATE         |                                             |
-| platform    | VARCHAR      | iOS / Android                               |
+- Sample Ratio Mismatch check (chi-square goodness-of-fit)
+- Welch's t-tests for AOV, UPT and RPRU (skewed spend, unequal variances)
+- Two-proportion z-test for abandonment, plus a user-level robust binomial GLM, since
+  sessions are not independent
+- Treatment × segment interaction tests, plus Holm–Bonferroni correction across segment tests
+- 95% bootstrap confidence intervals, resampling users to match the randomization unit
+- Revenue projection net of abandonment losses
 
-**experiment_assignments**
+**3. Tableau: stakeholder dashboard** (in progress; design spec in
+[`dashboard/dashboard_design.md`](dashboard/dashboard_design.md))
 
-| Column            | Type         | Notes                                                       |
-| ----------------- | ------------ | ----------------------------------------------------------- |
-| assignment_id     | VARCHAR (PK) | prefixed alphanumeric, e.g.`asn_...`                      |
-| user_id           | VARCHAR (FK) | unique — one fixed assignment per user                     |
-| variant           | VARCHAR      | control / treatment                                         |
-| first_assigned_ts | TIMESTAMP    | timestamp of the checkout session that triggered assignment |
+## Data
 
-**checkout_sessions**
+The data is **synthetic**, produced by [`scripts/generate_data.py`](scripts/generate_data.py)
+with a fixed seed. Effect sizes are embedded in the generator and recovered through the
+analysis rather than read off the script.
 
-| Column     | Type         | Notes                                  |
-| ---------- | ------------ | -------------------------------------- |
-| session_id | VARCHAR (PK) | prefixed alphanumeric, e.g.`ses_...` |
-| user_id    | VARCHAR (FK) |                                        |
-| session_ts | TIMESTAMP    |                                        |
-| completed  | BOOLEAN      | false = cart abandoned                 |
+![Schema diagram](assets/schema_diagram.png)
 
-**orders**
+<details>
+<summary>Table definitions</summary>
 
-| Column       | Type         | Notes                                             |
-| ------------ | ------------ | ------------------------------------------------- |
-| order_id     | VARCHAR (PK) | prefixed alphanumeric, e.g.`ord_...`            |
-| session_id   | VARCHAR (FK) | unique — at most one order per completed session |
-| order_amount | DECIMAL      | > 0                                               |
-| unit_count   | INT          | > 0                                               |
-| order_date   | DATE         |                                                   |
+| Table | Key columns | Notes |
+| --- | --- | --- |
+| `users` | `user_id` (PK), `signup_date`, `platform` | 20,000 users, iOS / Android |
+| `experiment_assignments` | `assignment_id` (PK), `user_id` (FK, unique), `variant`, `first_assigned_ts` | One fixed assignment per user |
+| `checkout_sessions` | `session_id` (PK), `user_id` (FK), `session_ts`, `completed` | `completed = false` → abandoned cart |
+| `orders` | `order_id` (PK), `session_id` (FK, unique), `order_amount`, `unit_count`, `order_date` | At most one order per completed session |
 
-## Tech Stack
+Full DDL with constraints: [`sql/01_schema.sql`](sql/01_schema.sql)
+</details>
 
-- **Database:** PostgreSQL, local instance
-- **SQL client:** DataGrip
-- **Data generation & analysis:** Python
-
-## Tooling Breakdown (each tool does distinct work, not redundant passes)
-
-**SQL** — build one clean user-level (and session-level, where needed)
-analytical table joining `users`, `experiment_assignments`,
-`checkout_sessions`, and `orders`; derive frequency segment, per-user
-and per-session metrics, and the abandonment flag. Query logic is intentionally
-not specified here — that design and implementation is the author's own work.
-
-**Python** — statistical inference on the SQL output:
-
-- SRM check (chi-square goodness-of-fit on variant assignment counts)
-- t-test / Welch's t-test: AOV, control vs. treatment
-- t-test: RPRU, control vs. treatment
-- t-test: UPT, control vs. treatment
-- Two-proportion z-test: cart abandonment rate, control vs. treatment
-- Segment cut: frequent vs. occasional shopper, applied to primary metrics
-- Revenue/lift translation: dollar impact projection
-
-**Tableau** — stakeholder-facing dashboard:
-
-- AOV by variant
-- RPRU by variant
-- UPT by variant
-- Cart abandonment rate by variant
-- Metrics split by frequent/occasional segment
-- Projected revenue impact
-
-## File Structure
+## Repository Structure
 
 ```
-upsell-ab-test/
 ├── README.md
+├── requirements.txt
+├── assets/
+│   ├── lift_summary.png             # results chart (generated by the notebook)
+│   └── schema_diagram.png
 ├── data/
-│   ├── raw/                  # generated CSVs, one per table
+│   ├── raw/                         # generated source tables
 │   │   ├── users.csv
 │   │   ├── experiment_assignments.csv
 │   │   ├── checkout_sessions.csv
 │   │   └── orders.csv
-│   └── processed/            # SQL aggregation output — analysis-ready table(s)
-│       └── user_level_analysis.csv
+│   └── processed/                   # SQL outputs used by the notebook
+│       ├── user_level_analysis.csv
+│       └── order_level_analysis.csv
 ├── sql/
-│   ├── schema.sql             # CREATE TABLE statements, DDL only
-│   └── aggregation_query.sql  # join/derivation logic
+│   ├── 01_schema.sql                # DDL: tables, keys, constraints
+│   ├── 02_aggregation_query.sql     # user-level and order-level aggregation
+│   └── sql_decisions.md             # rationale for non-obvious query choices
 ├── notebooks/
-│   └── analysis.ipynb         # SRM check, t-tests, segment analysis, revenue/lift translation
+│   └── analysis.ipynb               # SRM, hypothesis tests, CIs, segments, revenue
 ├── scripts/
-│   └── generate_data.py       # synthetic data generator
+│   └── generate_data.py             # seeded synthetic data generator
 ├── dashboard/
-│   └── upsell_ab_test.twbx    # Tableau workbook
-├── memo/
-│   └── executive_summary.md   # 1-page business-facing recommendation
-└── requirements.txt
+│   └── dashboard_design.md          # Tableau dashboard layout and color spec
+└── memo/
+    └── executive_summary.pdf        # one-page stakeholder recommendation
 ```
 
-## Deliverables
+## Reproduce
 
-- SQL scripts (aggregation pipeline)
-- Python notebook (SRM check, t-tests, segment analysis, revenue projection)
-- Tableau dashboard
-- 1-page executive memo (business-facing summary and recommendation)
-- Clean GitHub repo
+```bash
+pip install -r requirements.txt
 
-## Out of Scope
+# 1. (Optional) regenerate raw data. Seeded, so the output is identical.
+python scripts/generate_data.py
 
-- No more than one segmentation cut (frequent vs. occasional shopper only)
-- No multi-armed testing (control vs. one treatment only)
-- No additional guardrail metrics beyond cart abandonment rate
-- No returns/refunds tracking (treated as unrelated to the experiment)
-- No causal modeling beyond the t-test / two-proportion z-test framework
-- No session-level re-randomization (variant is fixed per user)
+# 2. Load into PostgreSQL
+createdb upsell_ab_test
+psql -d upsell_ab_test -f sql/01_schema.sql
+psql -d upsell_ab_test -c "\copy users FROM 'data/raw/users.csv' CSV HEADER"
+psql -d upsell_ab_test -c "\copy experiment_assignments FROM 'data/raw/experiment_assignments.csv' CSV HEADER"
+psql -d upsell_ab_test -c "\copy checkout_sessions FROM 'data/raw/checkout_sessions.csv' CSV HEADER"
+psql -d upsell_ab_test -c "\copy orders FROM 'data/raw/orders.csv' CSV HEADER"
 
-## Known Limitations (for README)
+# 3. Run the two queries in sql/02_aggregation_query.sql and export the results to
+#    data/processed/ (the processed CSVs are committed, so this step is optional)
 
-- A user's variant is fixed at first assignment; if a user's shopping
-  behavior or context changes meaningfully over the course of the experiment
-  window, later sessions still reflect their original assignment.
-- Synthetic data assumes independent checkout sessions; no explicit modeling
-  of cross-session learning or fatigue effects from repeated carousel
-  exposure.
+# 4. Run the analysis
+jupyter notebook notebooks/analysis.ipynb
+```
 
-## Timeline
+## Scope & Limitations
 
-Schema and scope finalized. Tables created in PostgreSQL via DataGrip.
-Synthetic data generation is the next step, followed by SQL aggregation and
-Python analysis.
+- **Synthetic data:** the project demonstrates method, not a real-world effect.
+- **One treatment, one segmentation cut** (frequent vs. occasional), and a single
+  guardrail metric.
+- **Fixed assignment:** variant is fixed at first exposure. The analysis does not model
+  novelty or fatigue from seeing the carousel repeatedly.
+- **Annualization:** the projection assumes the 90-day effect holds for a full year with
+  no decay. Treat it as an upper bound.
+- **Segment results are exploratory:** most segment-level tests do not survive
+  Holm–Bonferroni correction.
+
+---
+
+**Daniel Igbokwe** · MS Business Analytics, Boston University · [GitHub](https://github.com/danieligbokwe)

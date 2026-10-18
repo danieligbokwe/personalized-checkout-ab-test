@@ -9,3 +9,5 @@ Thumbs.db
 
 #Datagrip
 .idea/
+# Claude Code local config
+.claude/

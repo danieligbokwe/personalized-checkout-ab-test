@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 import string
 from datetime import timedelta
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Global config
@@ -238,9 +239,9 @@ def main():
     assignments_out = assignments_df.copy()
     assignments_out["first_assigned_ts"] = assignments_out["first_assigned_ts"].astype(str)
 
-    # Relative to wherever this script is run from -- run it from the project
-    # root (upsell-ab-test/) so this resolves to upsell-ab-test/data/raw
-    out_dir = "../data/raw"
+    # Resolved relative to this file, so the script works from any working directory
+    out_dir = Path(__file__).resolve().parent.parent / "data" / "raw"
+    out_dir.mkdir(parents=True, exist_ok=True)
     users_df.to_csv(f"{out_dir}/users.csv", index=False)
     assignments_out.to_csv(f"{out_dir}/experiment_assignments.csv", index=False)
     sessions_out.to_csv(f"{out_dir}/checkout_sessions.csv", index=False)
